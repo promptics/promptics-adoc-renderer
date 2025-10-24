@@ -53,7 +53,7 @@ install_gem_if_missing asciidoctor-diagram
 install_gem_if_missing rouge
 
 THEME_DIR="$INPUT_DIR"
-FONT_DIR="$THEME_DIR/fonts"
+FONT_DIR="$(cd "$(dirname "$0")/../fonts" && pwd)"
 mkdir -p "$FONT_DIR"
 
 download_font() {
@@ -67,7 +67,6 @@ download_font() {
 
 # --- Prüfe promptics-theme.yml auf Font-Referenzen, lade sie ggf. herunter ---
 CUSTOM_THEME="$THEME_DIR/promptics-theme.yml"
-FONT_DIR="$THEME_DIR/fonts"
 mkdir -p "$FONT_DIR"
 
 if [ -f "$CUSTOM_THEME" ]; then
