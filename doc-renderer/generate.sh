@@ -3,11 +3,8 @@
 # Skript bricht bei jedem Fehler ab, um unerwartete Zustände zu vermeiden
 set -e
 
-if [ -z "$1" ]; then
-  echo "Usage: $0 <input_directory>"
-  exit 1
-fi
-INPUT_DIR="$1"
+DEFAULT_DIR="$(cd "$(dirname "$0")/../docs" && pwd)"
+INPUT_DIR="${1:-$DEFAULT_DIR}"
 
 slugify() {
   echo "$1" | \
