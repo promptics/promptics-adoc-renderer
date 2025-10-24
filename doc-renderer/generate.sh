@@ -3,70 +3,19 @@
 # Skript bricht bei jedem Fehler ab, um unerwartete Zustände zu vermeiden
 set -e
 
-if [ ! -d "businessplan" ]; then
-  read -p "Autor: " author
-  docdate=$(date +%F)
-  echo "Verwende aktuelles Datum: $docdate"
-
-  output_dir="businessplan"
-  mkdir -p "$output_dir"
-
-  resource_dir="$output_dir/resourcen"
-  mkdir -p "$resource_dir"
-
-  titles=(
-    "Executive Summary"
-    "Gründungsidee"
-    "Produkt und Dienstleistung"
-    "Zielgruppe und Marktanalyse"
-    "Wettbewerbsanalyse"
-    "Marketing und Vertrieb"
-    "Rechtsform und Management"
-    "Organisation und Personal"
-    "Chancen und Risiken"
-    "Finanzplanung"
-    "Anlagen"
-  )
-
-  slugify() {
-    echo "$1" | \
-    tr '[:upper:]' '[:lower:]' | \
-    sed -E 's/ä/ae/g; s/ö/oe/g; s/ü/ue/g; s/ß/ss/g' | \
-    sed -E 's/[^a-z0-9]+/-/g' | \
-    sed -E 's/^-+|-+$//g'
-  }
-
-  for title in "${titles[@]}"; do
-    filename="$(slugify "$title").adoc"
-    {
-      echo "// tag::main[]"
-      echo "== $title"
-      echo ""
-      echo "// end::main[]"
-    } > "$output_dir/$filename"
-    mkdir -p "$resource_dir/$(slugify "$title")"
-  done
-
-  index_file="$output_dir/index.adoc"
-  {
-    echo "= Businessplan"
-    echo ":author: $author"
-    echo ":docdate: $docdate"
-    echo ":toc:"
-    echo ""
-    echo "[.pagebreak]"
-    echo "<<<"
-    echo ""
-    echo "// Indexdatei für den Businessplan"
-    echo ""
-    for title in "${titles[@]}"; do
-      filename="$(slugify "$title").adoc"
-      echo "include::$filename[tag=main]"
-    done
-  } > "$index_file"
-
-  echo "Businessplanstruktur erstellt in Verzeichnis: $output_dir"
+if [ -z "$1" ]; then
+  echo "Usage: $0 <input_directory>"
+  exit 1
 fi
+INPUT_DIR="$1"
+
+slugify() {
+  echo "$1" | \
+  tr '[:upper:]' '[:lower:]' | \
+  sed -E 's/ä/ae/g; s/ö/oe/g; s/ü/ue/g; s/ß/ss/g' | \
+  sed -E 's/[^a-z0-9]+/-/g' | \
+  sed -E 's/^-+|-+$//g'
+}
 
 docdate=$(date +%F)
 echo "Verwende aktuelles Datum: $docdate"
@@ -106,7 +55,7 @@ install_gem_if_missing asciidoctor-pdf
 install_gem_if_missing asciidoctor-diagram
 install_gem_if_missing rouge
 
-THEME_DIR="businessplan"
+THEME_DIR="$INPUT_DIR"
 FONT_DIR="$THEME_DIR/fonts"
 mkdir -p "$FONT_DIR"
 
@@ -119,8 +68,8 @@ download_font() {
   fi
 }
 
-# --- Prüfe custom-theme.yml auf Font-Referenzen, lade sie ggf. herunter ---
-CUSTOM_THEME="$THEME_DIR/custom-theme.yml"
+# --- Prüfe promptics-theme.yml auf Font-Referenzen, lade sie ggf. herunter ---
+CUSTOM_THEME="$THEME_DIR/promptics-theme.yml"
 FONT_DIR="$THEME_DIR/fonts"
 mkdir -p "$FONT_DIR"
 
@@ -159,11 +108,19 @@ if [ ! -f "$PLANTUML_JAR" ]; then
   curl -L -o "$PLANTUML_JAR" https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar
 fi
 
-# Generate Gantt chart PNG from Mermaid
-echo "🛠 Generating Gantt chart..."
-mmdc -i businessplan/gantt.mmd -o businessplan/gantt.png
+echo "🛠 Suche nach Mermaid-Diagrammen..."
+find "$INPUT_DIR" -type f -name '*.mmd' | while read -r mmd_file; do
+  png_file="${mmd_file%.mmd}.png"
+  echo "Render: $mmd_file → $png_file"
+  mmdc -i "$mmd_file" -o "$png_file"
+done
 
-# Erzeuge das finale PDF aus der AsciiDoc-Datei mit benutzerdefiniertem Theme und Schriftarten
-echo "Erzeuge PDF aus $THEME_DIR/index.adoc ..."
-asciidoctor-pdf -r asciidoctor-diagram -a pdf-theme=custom-theme.yml -a pdf-themesdir="." -a pdf-fontsdir="$FONT_DIR" "$THEME_DIR/index.adoc" -o "Businessplan.pdf"
-echo "PDF wurde erstellt: Businessplan.pdf"
+echo "🛠 Suche nach PlantUML-Dateien..."
+find "$INPUT_DIR" -type f -name 'plant.yml' | while read -r yml_file; do
+  echo "Render PlantUML: $yml_file"
+  java -jar "$PLANTUML_JAR" -tpng "$yml_file"
+done
+
+echo "Erzeuge PDF aus $INPUT_DIR/index.adoc ..."
+asciidoctor-pdf -r asciidoctor-diagram -a pdf-theme=promptics-theme.yml -a pdf-themesdir="." -a pdf-fontsdir="$FONT_DIR" "$INPUT_DIR/index.adoc" -o "${INPUT_DIR}.pdf"
+echo "PDF wurde erstellt: ${INPUT_DIR}.pdf"
