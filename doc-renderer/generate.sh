@@ -13,7 +13,7 @@ DEBUG=false
 ### --- Logging ---
 log()   { echo -e "[INFO] $1"; }
 warn()  { echo -e "\033[33m[WARN]\033[0m $1"; }
-error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
+error() { echo -e "[ERROR] $1"; exit 1; }
 
 ### --- Tool presence check ---
 require_tool() {
@@ -55,6 +55,17 @@ parse_args() {
   done
 }
 
+normalize_and_validate_input_dir() {
+  # resolve to absolute path
+  if [[ ! "$INPUT_DIR" = /* ]]; then
+    INPUT_DIR="$(cd "$(dirname "$0")/$INPUT_DIR" && pwd)"
+  fi
+  if [[ ! -d "$INPUT_DIR" ]]; then
+    error "Input directory does not exist: $INPUT_DIR"
+  fi
+  $DEBUG && log "Using input directory: $INPUT_DIR"
+}
+
 ### --- Check required tools ---
 check_tools() {
   require_tool ruby "" true
@@ -90,12 +101,14 @@ detect_main_adoc() {
   elif [[ -f "$INPUT_DIR/index.adoc" ]]; then
     MAIN="$INPUT_DIR/index.adoc"
   else
-    local count
-    count=$(find "$INPUT_DIR" -maxdepth 1 -name '*.adoc' | wc -l)
-    if [[ "$count" -eq 1 ]]; then
-      MAIN=$(find "$INPUT_DIR" -maxdepth 1 -name '*.adoc')
+    local files=($(find "$INPUT_DIR" -maxdepth 1 -name '*.adoc'))
+    local count=${#files[@]}
+    if [[ "$count" -eq 0 ]]; then
+      error "No AsciiDoc files found in: $INPUT_DIR"
+    elif [[ "$count" -eq 1 ]]; then
+      MAIN="${files[0]}"
     else
-      error "Cannot determine main AsciiDoc file. Please specify using --index."
+      error "Multiple AsciiDoc files found. Please specify the main file with --index."
     fi
   fi
   [[ -f "$MAIN" ]] || error "Main file not found: $MAIN"
@@ -169,6 +182,7 @@ generate_output() {
 ### --- Main entry point ---
 main() {
   parse_args "$@"
+  normalize_and_validate_input_dir
   check_tools
   download_plantuml
   detect_main_adoc
@@ -178,6 +192,8 @@ main() {
   run_linter
   check_images
   generate_output
+  log "Rendering complete."
 }
+
 
 main "$@"
