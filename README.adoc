@@ -1,0 +1,68 @@
+= AsciiDoc Project Renderer
+Promptics · 2025-10-25
+:toc: macro
+:icons: font
+:source-highlighter: rouge
+
+A utility script to convert one or more AsciiDoc files into PDF or HTML output, including support for diagrams (Mermaid, PlantUML), theme customization, font verification, and optional linting.
+
+toc::[]
+
+== Requirements
+
+- Bash (Unix-like shell)
+- Ruby with `asciidoctor`, `asciidoctor-pdf`, `asciidoctor-diagram`
+- Java (for PlantUML)
+- Node-based `mmdc` (for Mermaid)
+- Optional: `fc-list`, `asciidoctor-lint`
+
+== Directory Structure
+
+[source]
+----
+project-root/
+├── generate.sh
+├── theme.yml
+├── fonts/
+│   └── Inter-Regular.ttf
+├── docs/
+│   └── index.adoc
+----
+
+== Usage
+
+[source,shell]
+----
+chmod +x generate.sh
+./generate.sh
+----
+
+Common options:
+
+- `-i`, `--input`: input directory (default: `../docs`)
+- `-t`, `--theme`: theme file (default: `theme.yml`)
+- `-o`, `--output`: output file path
+- `-x`, `--index`: main AsciiDoc file (default: `index.adoc` or first `.adoc`)
+- `--format`: `pdf` (default) or `html`
+- `--dry-run`: check only
+- `--debug`: verbose output
+
+Example:
+
+[source,shell]
+----
+./generate.sh -i ./docs -t custom-theme.yml --format html --debug
+----
+
+== Features
+
+- Auto-detects main AsciiDoc file
+- Renders embedded `[plantuml]` and `mermaid` diagrams
+- Generates PDF or HTML
+- Verifies required fonts and tools
+- Optional linting with `asciidoctor-lint`
+- Warns on missing images or diagrams
+
+== License
+
+MIT or similar — adapt as needed.

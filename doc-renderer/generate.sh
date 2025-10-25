@@ -1,122 +1,183 @@
 #!/bin/bash
-
-# Skript bricht bei jedem Fehler ab, um unerwartete Zustände zu vermeiden
 set -e
 
-DEFAULT_DIR="$(cd "$(dirname "$0")/../docs" && pwd)"
-INPUT_DIR="${1:-$DEFAULT_DIR}"
+### --- Configurable parameters with defaults ---
+INPUT_DIR="../docs"
+THEME_FILE="theme.yml"
+OUTPUT_FILE=""
+MAIN_FILE=""
+FORMAT="pdf"
+DRY_RUN=false
+DEBUG=false
 
-slugify() {
-  echo "$1" | \
-  tr '[:upper:]' '[:lower:]' | \
-  sed -E 's/ä/ae/g; s/ö/oe/g; s/ü/ue/g; s/ß/ss/g' | \
-  sed -E 's/[^a-z0-9]+/-/g' | \
-  sed -E 's/^-+|-+$//g'
-}
+### --- Logging ---
+log()   { echo -e "[INFO] $1"; }
+warn()  { echo -e "\033[33m[WARN]\033[0m $1"; }
+error() { echo -e "\033[31m[ERROR]\033[0m $1"; exit 1; }
 
-docdate=$(date +%F)
-echo "Verwende aktuelles Datum: $docdate"
-
-# --- Prüfe und installiere Ruby, Bundler und benötigte Gems ---
-
-# Prüfe ob Ruby installiert ist
-if ! command -v ruby &> /dev/null; then
-  echo "Ruby ist nicht installiert. Bitte installiere Ruby manuell."
-  exit 1
-fi
-
-# Prüfe ob gem installiert ist
-if ! command -v gem &> /dev/null; then
-  echo "RubyGems (gem) ist nicht installiert. Bitte prüfe deine Ruby-Installation."
-  exit 1
-fi
-
-# Prüfe ob bundler installiert ist
-if ! gem list bundler -i > /dev/null; then
-  echo "Bundler wird installiert ..."
-  gem install bundler
-fi
-
-# Installiere erforderliche Gems nur wenn nicht vorhanden
-install_gem_if_missing() {
-  local gem_name=$1
-  if ! gem list "$gem_name" -i > /dev/null; then
-    echo "Installiere Ruby Gem: $gem_name"
-    gem install "$gem_name"
+### --- Tool presence check ---
+require_tool() {
+  local tool="$1"
+  local fallback="$2"
+  local required="$3"
+  if command -v "$tool" > /dev/null; then
+    $DEBUG && log "Tool available: $tool"
+    return 0
+  elif [ -n "$fallback" ] && command -v "$fallback" > /dev/null; then
+    warn "Tool '$tool' not found, using fallback '$fallback'"
+    return 0
   else
-    echo "$gem_name ist bereits installiert."
-  fi
-}
-
-install_gem_if_missing asciidoctor-pdf
-install_gem_if_missing asciidoctor-diagram
-install_gem_if_missing rouge
-
-THEME_DIR="$INPUT_DIR"
-FONT_DIR="$(cd "$(dirname "$0")/../fonts" && pwd)"
-mkdir -p "$FONT_DIR"
-
-download_font() {
-  local url=$1
-  local dest=$2
-  if [ ! -f "$dest" ]; then
-    echo "Lade Schriftart $dest ..."
-    curl -L -o "$dest" "$url"
-  fi
-}
-
-# --- Prüfe promptics-theme.yml auf Font-Referenzen, lade sie ggf. herunter ---
-CUSTOM_THEME="$THEME_DIR/promptics-theme.yml"
-mkdir -p "$FONT_DIR"
-
-if [ -f "$CUSTOM_THEME" ]; then
-  grep -E '\.ttf' "$CUSTOM_THEME" | grep -o '[^/ ]*\.ttf' | sort -u | while read -r fontfile; do
-    case "$fontfile" in
-      SourceSerifPro-*.ttf)
-        url="https://github.com/adobe-fonts/source-serif-pro/raw/release/TTF/$fontfile"
-        ;;
-      NotoSans-*.ttf)
-        url="https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSans/$fontfile"
-        ;;
-      *)
-        echo "ERROR: URL for $fontfile not defined."
-        exit 1
-        ;;
-    esac
-
-    dest="$FONT_DIR/$fontfile"
-    if curl --output /dev/null --silent --head --fail "$url"; then
-      if [ ! -f "$dest" ]; then
-        echo "Downloading font $fontfile ..."
-        curl -L -o "$dest" "$url" || { echo "ERROR: Failed to download $fontfile"; exit 1; }
-      fi
+    if [[ "$required" == "true" ]]; then
+      error "Required tool '$tool' (or fallback '$fallback') not found."
     else
-      echo "ERROR: Font $fontfile not found at $url."
-      exit 1
+      warn "Optional tool '$tool' not found. Some functionality may be limited."
+      return 1
+    fi
+  fi
+}
+
+### --- Parse CLI arguments ---
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -i|--input)  INPUT_DIR="$2"; shift ;;
+      -t|--theme)  THEME_FILE="$2"; shift ;;
+      -o|--output) OUTPUT_FILE="$2"; shift ;;
+      -x|--index)  MAIN_FILE="$2"; shift ;;
+      --format)    FORMAT="$2"; shift ;;
+      --dry-run)   DRY_RUN=true ;;
+      --debug)     DEBUG=true ;;
+      -h|--help)
+        echo "Usage: $0 [-i dir] [-t theme.yml] [--format pdf|html] [--dry-run]"; exit 0 ;;
+      *) error "Unknown parameter: $1" ;;
+    esac
+    shift
+  done
+}
+
+### --- Check required tools ---
+check_tools() {
+  require_tool ruby "" true
+  require_tool gem "" true
+  require_tool curl "" true
+  require_tool java "" true
+  require_tool asciidoctor-pdf "" false
+  require_tool asciidoctor "" false
+  require_tool asciidoctor-diagram "" false
+  require_tool mmdc "" false
+  require_tool fc-list "" false
+  require_tool asciidoctor-lint "" false
+}
+
+### --- Download PlantUML JAR if needed ---
+download_plantuml() {
+  PLANTUML_JAR="./plantuml.jar"
+  export PLANTUML_JAR
+  if [[ ! -f "$PLANTUML_JAR" ]]; then
+    log "Downloading PlantUML jar ..."
+    curl -L -o "$PLANTUML_JAR" https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar || {
+      error "Failed to download PlantUML jar"
+    }
+  else
+    $DEBUG && log "PlantUML jar already exists."
+  fi
+}
+
+### --- Determine main .adoc file ---
+detect_main_adoc() {
+  if [[ -n "$MAIN_FILE" ]]; then
+    MAIN="$INPUT_DIR/$MAIN_FILE"
+  elif [[ -f "$INPUT_DIR/index.adoc" ]]; then
+    MAIN="$INPUT_DIR/index.adoc"
+  else
+    local count
+    count=$(find "$INPUT_DIR" -maxdepth 1 -name '*.adoc' | wc -l)
+    if [[ "$count" -eq 1 ]]; then
+      MAIN=$(find "$INPUT_DIR" -maxdepth 1 -name '*.adoc')
+    else
+      error "Cannot determine main AsciiDoc file. Please specify using --index."
+    fi
+  fi
+  [[ -f "$MAIN" ]] || error "Main file not found: $MAIN"
+  $DEBUG && log "Detected main file: $MAIN"
+}
+
+### --- Check fonts referenced in theme ---
+verify_fonts() {
+  local FONT_DIR="$(cd "$(dirname "$0")/../fonts" && pwd)"
+  grep -Eo '[^"]+\.ttf' "$THEME_FILE" | while read -r fontfile; do
+    if [[ ! -f "$FONT_DIR/$fontfile" ]]; then
+      if fc-list | grep -i "$(basename "$fontfile")" > /dev/null; then
+        warn "Font '$fontfile' not found locally, but exists system-wide."
+      else
+        warn "Font missing: $fontfile"
+      fi
     fi
   done
-fi
+}
 
-# --- PlantUML Integration ---
-export PLANTUML_JAR=$(pwd)/plantuml.jar
-if [ ! -f "$PLANTUML_JAR" ]; then
-  echo "Lade plantuml.jar ..."
-  curl -L -o "$PLANTUML_JAR" https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar
-fi
+### --- Render embedded diagrams ---
+render_diagrams() {
+  find "$INPUT_DIR" -name '*.mmd' | while read -r f; do
+    out="${f%.mmd}.png"
+    log "Rendering Mermaid: $f → $out"
+    mmdc -i "$f" -o "$out"
+  done
+  find "$INPUT_DIR" -name '*.puml' -o -name '*.plantuml' -o -name 'plant.yml' | while read -r f; do
+    log "Rendering PlantUML: $f"
+    java -jar "$PLANTUML_JAR" -tpng "$f"
+  done
+}
 
-echo "🛠 Suche nach Mermaid-Diagrammen..."
-find "$INPUT_DIR" -type f -name '*.mmd' | while read -r mmd_file; do
-  png_file="${mmd_file%.mmd}.png"
-  echo "Render: $mmd_file → $png_file"
-  mmdc -i "$mmd_file" -o "$png_file"
-done
+### --- Run linter if available ---
+run_linter() {
+  if command -v asciidoctor-lint > /dev/null; then
+    log "Linting $MAIN ..."
+    asciidoctor-lint "$MAIN" || warn "Linter reported warnings."
+  fi
+}
 
-echo "🛠 Suche nach PlantUML-Dateien..."
-find "$INPUT_DIR" -type f -name 'plant.yml' | while read -r yml_file; do
-  echo "Render PlantUML: $yml_file"
-  java -jar "$PLANTUML_JAR" -tpng "$yml_file"
-done
+### --- Check for broken image references ---
+check_images() {
+  grep -Eo 'image::[^[]+' "$MAIN" | cut -d: -f2- | while read -r path; do
+    if [[ ! -f "$INPUT_DIR/$path" ]]; then
+      warn "Image not found: $path"
+    fi
+  done
+}
 
-echo "Erzeuge PDF aus $INPUT_DIR/index.adoc ..."
-asciidoctor-pdf -r asciidoctor-diagram -a pdf-theme=promptics-theme.yml -a pdf-themesdir="." -a pdf-fontsdir="$FONT_DIR" "$INPUT_DIR/index.adoc" -o "${INPUT_DIR}.pdf"
-echo "PDF wurde erstellt: ${INPUT_DIR}.pdf"
+### --- Generate output (PDF or HTML) ---
+generate_output() {
+  local base="$(basename "$MAIN" .adoc)"
+  local out="${OUTPUT_FILE:-output/$base.$FORMAT}"
+  mkdir -p "$(dirname "$out")"
+
+  if [[ "$FORMAT" == "pdf" ]]; then
+    log "Generating PDF ..."
+    asciidoctor-pdf -r asciidoctor-diagram \
+      -a pdf-theme="$THEME_FILE" \
+      -a pdf-themesdir="." \
+      -a pdf-fontsdir="../fonts" \
+      "$MAIN" -o "$out"
+  else
+    log "Generating HTML ..."
+    asciidoctor -r asciidoctor-diagram "$MAIN" -o "$out"
+  fi
+  log "Output written to: $out"
+}
+
+### --- Main entry point ---
+main() {
+  parse_args "$@"
+  check_tools
+  download_plantuml
+  detect_main_adoc
+  [[ "$DRY_RUN" == "true" ]] && log "Dry-run complete." && exit 0
+  verify_fonts
+  render_diagrams
+  run_linter
+  check_images
+  generate_output
+}
+
+main "$@"
