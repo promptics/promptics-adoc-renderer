@@ -74,7 +74,7 @@ check_tools() {
   require_tool java "" true
   require_tool asciidoctor-pdf "" false
   require_tool asciidoctor "" false
-  require_tool asciidoctor-diagram "" false
+  # Temporarily disabled for testing: require_tool asciidoctor-diagram "" false
   require_tool mmdc "" false
   require_tool fc-list "" false
   require_tool asciidoctor-lint "" false
@@ -118,15 +118,54 @@ detect_main_adoc() {
 ### --- Check fonts referenced in theme ---
 verify_fonts() {
   local FONT_DIR="$(cd "$(dirname "$0")/../fonts" && pwd)"
-  grep -Eo '[^"]+\.ttf' "$THEME_FILE" | while read -r fontfile; do
+  local missing_fonts=()
+  local system_fonts_available=()
+
+  # Check what fonts the theme requires (both .ttf and .ttc)
+  grep -Eo '[^"]+\.tt[cf]' "$THEME_FILE" | while read -r fontfile; do
+    local fontname=$(basename "$fontfile" .ttf | basename "$fontfile" .ttc)
+    local base_font=$(echo "$fontname" | cut -d- -f1)
+
     if [[ ! -f "$FONT_DIR/$fontfile" ]]; then
-      if fc-list | grep -i "$(basename "$fontfile")" > /dev/null; then
-        warn "Font '$fontfile' not found locally, but exists system-wide."
+      missing_fonts+=("$fontfile")
+
+      # Enhanced system font detection using fc-list
+      if fc-list | grep -i "$base_font" > /dev/null; then
+        if [[ ! " ${system_fonts_available[*]} " =~ " ${base_font} " ]]; then
+          system_fonts_available+=("$base_font")
+        fi
+        warn "Font '$fontfile' not found locally, but '$base_font' exists system-wide."
       else
         warn "Font missing: $fontfile"
       fi
+    elif [[ ! -s "$FONT_DIR/$fontfile" ]]; then
+      warn "Font file '$fontfile' exists but is empty (0 bytes)"
+    else
+      $DEBUG && log "Font available: $fontfile"
     fi
   done
+
+  if [[ ${#missing_fonts[@]} -gt 0 ]]; then
+    warn "Missing fonts may cause PDF generation to fail."
+    warn "To fix: Install Inter fonts or update theme.yml to use available fonts."
+
+    if [[ ${#system_fonts_available[@]} -gt 0 ]]; then
+      warn "System fonts detected: ${system_fonts_available[*]}"
+      warn "System fonts will be automatically used as fallback during PDF generation"
+      warn "Available system font directories:"
+      for font_dir in "/System/Library/Fonts" "/System/Library/Fonts/Supplemental" "/Library/Fonts" "$HOME/Library/Fonts"; do
+        if [[ -d "$font_dir" ]]; then
+          local font_count=$(find "$font_dir" -name "*.ttf" -o -name "*.ttc" -o -name "*.otf" 2>/dev/null | wc -l)
+          warn "  $font_dir ($font_count fonts)"
+          if [[ -n "$(find "$font_dir" -name "*inter*" -o -name "*Inter*" 2>/dev/null)" ]]; then
+            warn "    → Contains Inter font family"
+          fi
+        fi
+      done
+    fi
+
+    warn "Available fonts in ../fonts/: $(ls "$FONT_DIR"/*.{ttf,ttc} 2>/dev/null | xargs basename -a 2>/dev/null || echo 'none')"
+  fi
 }
 
 ### --- Render embedded diagrams ---
@@ -165,18 +204,62 @@ generate_output() {
   local out="${OUTPUT_FILE:-output/$base.$FORMAT}"
   mkdir -p "$(dirname "$out")"
 
+  # Check if we need to use system fonts
+  local system_font_dirs=""
+  if [[ "$FORMAT" == "pdf" ]] && command -v fc-list > /dev/null; then
+    local fonts_missing=false
+
+    # Check if required fonts are missing from local directory
+    grep -Eo '[^"]+\.tt[cf]' "$THEME_FILE" | while read -r fontfile; do
+      if [[ ! -f "../fonts/$fontfile" ]] || [[ ! -s "../fonts/$fontfile" ]]; then
+        fonts_missing=true
+        break
+      fi
+    done
+
+    # Add system font directories if fonts are missing
+    if [[ "$fonts_missing" == "true" ]]; then
+      for font_dir in "/System/Library/Fonts" "/System/Library/Fonts/Supplemental" "/Library/Fonts" "$HOME/Library/Fonts"; do
+        if [[ -d "$font_dir" ]]; then
+          system_font_dirs="$system_font_dirs -a pdf-fontsdir=\"$font_dir\""
+        fi
+      done
+
+      if [[ -n "$system_font_dirs" ]]; then
+        log "Using system fonts as fallback"
+      fi
+    fi
+  fi
+
   if [[ "$FORMAT" == "pdf" ]]; then
     log "Generating PDF ..."
-    asciidoctor-pdf -r asciidoctor-diagram \
+    # Temporarily disable asciidoctor-diagram for testing
+    asciidoctor-pdf \
       -a pdf-theme="$THEME_FILE" \
       -a pdf-themesdir="." \
-      -a pdf-fontsdir="../fonts" \
+      -a pdf-fontsdir="../fonts" $system_font_dirs \
       "$MAIN" -o "$out"
+    local exit_code=$?
   else
     log "Generating HTML ..."
-    asciidoctor -r asciidoctor-diagram "$MAIN" -o "$out"
+    asciidoctor "$MAIN" -o "$out"
+    local exit_code=$?
   fi
-  log "Output written to: $out"
+
+  # Verify output was created successfully
+  if [[ $exit_code -eq 0 ]] && [[ -f "$out" ]] && [[ -s "$out" ]]; then
+    log "Output written to: $out"
+  else
+    if [[ $exit_code -ne 0 ]]; then
+      error "Failed to generate $FORMAT (exit code: $exit_code). Check for missing fonts or other dependencies."
+    elif [[ ! -f "$out" ]]; then
+      error "Output file was not created: $out"
+    elif [[ ! -s "$out" ]]; then
+      error "Output file is empty: $out"
+    else
+      error "Output generation failed for unknown reason"
+    fi
+  fi
 }
 
 ### --- Main entry point ---

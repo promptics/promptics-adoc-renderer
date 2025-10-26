@@ -4,10 +4,10 @@ font:
   color: '#000000'
   catalog:
     Inter:
-      normal: Inter-Regular.ttf
-      bold: Inter-Bold.ttf
-      italic: Inter-Italic.ttf
-      bold_italic: Inter-BoldItalic.ttf
+      normal: Inter.ttc
+      bold: Inter.ttc
+      italic: Inter.ttc
+      bold_italic: Inter.ttc
 page:
   background_color: FFFFFF
   layout: portrait
