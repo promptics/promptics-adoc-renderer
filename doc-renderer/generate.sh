@@ -10,6 +10,7 @@ MAIN_FILE=""
 FORMAT="pdf"
 DRY_RUN=false
 DEBUG=false
+BOOTSTRAP=false
 
 # Derived paths
 FONTS_DIR="$SCRIPT_DIR/fonts"
@@ -175,6 +176,7 @@ parse_args() {
       --format)    FORMAT="$2"; shift ;;
       --dry-run)   DRY_RUN=true ;;
       --debug)     DEBUG=true ;;
+      --bootstrap) BOOTSTRAP=true ;;
       -h|--help)
         echo "Usage: $0 [-i dir] [-t theme.yml] [--format pdf|html] [--dry-run]"
         echo ""
@@ -189,6 +191,7 @@ parse_args() {
         echo "  -x, --index <file>   Main AsciiDoc file"
         echo "  --format <format>    Output format: pdf or html (default: pdf)"
         echo "  --dry-run           Check setup without generating output"
+        echo "  --bootstrap         Prepare tooling (fonts, PlantUML) and exit"
         echo "  --debug             Enable verbose output"
         echo "  -h, --help          Show this help message"
         exit 0 ;;
@@ -610,6 +613,15 @@ generate_output() {
 ### --- Main entry point ---
 main() {
   parse_args "$@"
+  if [[ "$BOOTSTRAP" == "true" ]]; then
+    log "Bootstrap mode: preparing renderer assets..."
+    check_tools
+    download_plantuml
+    verify_fonts
+    log "Bootstrap complete."
+    exit 0
+  fi
+
   normalize_and_validate_input_dir
   check_tools
   download_plantuml

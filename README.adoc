@@ -8,6 +8,23 @@ A generator toolkit for turning AsciiDoc projects into PDF or HTML, complete wit
 
 toc::[]
 
+== Quick Install
+
+[source,shell]
+----
+curl -sSL https://raw.githubusercontent.com/promptics-org/promptics-adoc-renderer/main/install-renderer.sh | bash
+----
+
+To install into a specific directory or pin a branch/tag:
+
+[source,shell]
+----
+curl -sSL https://raw.githubusercontent.com/promptics-org/promptics-adoc-renderer/main/install-renderer.sh \
+  | bash -s -- --dir tools/doc-renderer --branch v1.2.3
+----
+
+The installer downloads the renderer, marks `generate.sh` as executable, and runs `./generate.sh --bootstrap` to fetch fonts and the PlantUML jar. Pass `--skip-bootstrap` to postpone the download step.
+
 == Requirements
 
 - Bash (Unix-like shell)
