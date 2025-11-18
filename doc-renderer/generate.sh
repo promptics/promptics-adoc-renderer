@@ -234,7 +234,6 @@ check_tools() {
   # Check for other optional tools
   require_tool mmdc "" false
   require_tool fc-list "" false
-  require_tool asciidoctor-lint "" false
 
   # Offer installation if tools are missing
   offer_installation
