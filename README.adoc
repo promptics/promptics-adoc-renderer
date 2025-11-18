@@ -1,4 +1,4 @@
-= AsciiDoc Project Renderer
+= 🤖 AsciiDoc Project Renderer
 Promptics · 2025-11-18
 :toc: macro
 :icons: font
@@ -91,4 +91,4 @@ Example:
 
 == License
 
-MIT or similar — adapt as needed.
+Licensed under the Apache License, Version 2.0. See the link:LICENSE.txt[] file for full terms.
