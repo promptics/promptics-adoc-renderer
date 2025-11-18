@@ -4,3 +4,4 @@
 /fonts/**
 doc-renderer/plantuml.jar
 /.idea/
+/plantuml.jar

@@ -13,6 +13,21 @@ DEBUG=false
 
 # Derived paths
 FONTS_DIR="$SCRIPT_DIR/fonts"
+FONT_RELEASE_URL="https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip"
+FONT_ARCHIVE_NAME="Inter-4.1.zip"
+FONT_ARCHIVE_PATH="$SCRIPT_DIR/$FONT_ARCHIVE_NAME"
+REQUIRED_FONTS=(
+  "Inter-Regular.ttf"
+  "Inter-Bold.ttf"
+  "Inter-Italic.ttf"
+  "Inter-BoldItalic.ttf"
+)
+FONT_ARCHIVE_ENTRIES=(
+  "extras/ttf/Inter-Regular.ttf"
+  "extras/ttf/Inter-Bold.ttf"
+  "extras/ttf/Inter-Italic.ttf"
+  "extras/ttf/Inter-BoldItalic.ttf"
+)
 MISSING_TOOLS=()
 INSTALLABLE_TOOLS=()
 PACKAGE_MANAGER=""
@@ -246,6 +261,49 @@ download_plantuml() {
   fi
 }
 
+### --- Ensure bundled fonts are available ---
+ensure_bundled_fonts() {
+  mkdir -p "$FONTS_DIR"
+
+  local missing_fonts=()
+  for font_file in "${REQUIRED_FONTS[@]}"; do
+    if [[ ! -f "$FONTS_DIR/$font_file" ]]; then
+      missing_fonts+=("$font_file")
+    fi
+  done
+
+  if [[ ${#missing_fonts[@]} -eq 0 ]]; then
+    $DEBUG && log "Bundled fonts already present."
+    return 0
+  fi
+
+  local need_archive=false
+  for font_file in "${missing_fonts[@]}"; do
+    need_archive=true
+    break
+  done
+
+  if [[ "$need_archive" == true ]]; then
+    log "Downloading bundled Inter fonts..."
+    if curl -fsSL "$FONT_RELEASE_URL" -o "$FONT_ARCHIVE_PATH"; then
+      $DEBUG && log "Downloaded font archive to $FONT_ARCHIVE_PATH"
+      for i in "${!missing_fonts[@]}"; do
+        local font_file="${missing_fonts[$i]}"
+        local entry="${FONT_ARCHIVE_ENTRIES[$i]}"
+        if unzip -j -o "$FONT_ARCHIVE_PATH" "$entry" -d "$FONTS_DIR" >/dev/null 2>&1; then
+          mv "$FONTS_DIR/$(basename "$entry")" "$FONTS_DIR/$font_file" 2>/dev/null || true
+          $DEBUG && log "Extracted $font_file"
+        else
+          warn "Failed to extract $font_file from archive entry $entry"
+        fi
+      done
+      rm -f "$FONT_ARCHIVE_PATH"
+    else
+      warn "Failed to download Inter fonts archive from $FONT_RELEASE_URL"
+    fi
+  fi
+}
+
 ### --- Determine main .adoc file ---
 detect_main_adoc() {
   if [[ -n "$MAIN_FILE" ]]; then
@@ -280,19 +338,15 @@ verify_fonts() {
     return 1
   fi
 
+  ensure_bundled_fonts
+
   if [[ ! -d "$FONTS_DIR" ]]; then
     warn "Bundled fonts directory not found: $FONTS_DIR"
   else
     log "Using bundled fonts from: $FONTS_DIR"
     local missing_fonts=0
-    local required_fonts=(
-      "Inter-Regular.ttf"
-      "Inter-Bold.ttf"
-      "Inter-Italic.ttf"
-      "Inter-BoldItalic.ttf"
-    )
 
-    for font_file in "${required_fonts[@]}"; do
+    for font_file in "${REQUIRED_FONTS[@]}"; do
       if [[ ! -f "$FONTS_DIR/$font_file" ]]; then
         warn "Missing bundled font: $font_file"
         ((missing_fonts++))
