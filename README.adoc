@@ -1,10 +1,10 @@
 = AsciiDoc Project Renderer
-Promptics · 2025-10-25
+Promptics · 2025-11-18
 :toc: macro
 :icons: font
 :source-highlighter: rouge
 
-A utility script to convert one or more AsciiDoc files into PDF or HTML output, including support for diagrams (Mermaid, PlantUML), theme customization, font verification, and optional linting.
+A generator toolkit for turning AsciiDoc projects into PDF or HTML, complete with Mermaid / PlantUML diagram support, theme customization, automatic font management, and optional linting.
 
 toc::[]
 
@@ -21,37 +21,39 @@ toc::[]
 [source]
 ----
 project-root/
-├── generate.sh
-├── theme.yml
-├── fonts/
-│   └── Inter-Regular.ttf
+├── doc-renderer/
+│   ├── generate.sh
+│   ├── promptics-theme.yml
+│   ├── fonts/          # auto-managed; populated on demand
+│   └── plantuml.jar    # downloaded automatically when needed
 ├── docs/
 │   └── index.adoc
+└── …
 ----
 
 == Usage
 
 [source,shell]
 ----
-chmod +x generate.sh
-./generate.sh
+chmod +x doc-renderer/generate.sh
+./doc-renderer/generate.sh
 ----
 
 Common options:
 
-- `-i`, `--input`: input directory (default: `../docs`)
-- `-t`, `--theme`: theme file (default: `theme.yml`)
-- `-o`, `--output`: output file path
-- `-x`, `--index`: main AsciiDoc file (default: `index.adoc` or first `.adoc`)
+- `-i`, `--input`: input directory (default: `../docs` relative to `doc-renderer/`)
+- `-t`, `--theme`: theme file (default: `promptics-theme.yml`)
+- `-o`, `--output`: output file path (defaults to `<index>.<format>`)
+- `-x`, `--index`: main AsciiDoc file (default: `index.adoc` or the sole `.adoc` file)
 - `--format`: `pdf` (default) or `html`
-- `--dry-run`: check only
-- `--debug`: verbose output
+- `--dry-run`: verify tooling, fonts, and dependencies without generating output
+- `--debug`: emit verbose diagnostic information
 
 Example:
 
 [source,shell]
 ----
-./generate.sh -i ./docs -t custom-theme.yml --format html --debug
+./doc-renderer/generate.sh -i ./docs -t doc-renderer/promptics-theme.yml --format html --debug
 ----
 
 == Features
@@ -59,9 +61,16 @@ Example:
 - Auto-detects main AsciiDoc file
 - Renders embedded `[plantuml]` and `mermaid` diagrams
 - Generates PDF or HTML
-- Verifies required fonts and tools
+- Verifies required tools and fetches missing ones when possible
+- Downloads PlantUML JAR on demand
+- Auto-discovers fonts referenced in the theme and downloads them if absent
 - Optional linting with `asciidoctor-lint`
 - Warns on missing images or diagrams
+
+== Notes on Fonts
+
+- Fonts referenced in `promptics-theme.yml` are stored under `doc-renderer/fonts/` and are downloaded automatically from the upstream source if missing.
+- You generally do *not* need to commit the populated `fonts/` directory; allow the script to manage it per environment.
 
 == License
 
