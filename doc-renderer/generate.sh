@@ -1,8 +1,10 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 ### --- Configurable parameters with defaults ---
 INPUT_DIR="../docs"
-THEME_FILE="theme.yml"
+THEME_FILE="promptics-theme.yml"
 OUTPUT_FILE=""
 MAIN_FILE=""
 FORMAT="pdf"
@@ -10,7 +12,7 @@ DRY_RUN=false
 DEBUG=false
 
 # Derived paths
-FONTS_DIR="$(cd "$(dirname "$0")/../fonts" && pwd)"
+FONTS_DIR="$SCRIPT_DIR/fonts"
 MISSING_TOOLS=()
 INSTALLABLE_TOOLS=()
 PACKAGE_MANAGER=""
@@ -191,7 +193,7 @@ parse_args() {
 normalize_and_validate_input_dir() {
   # resolve to absolute path
   if [[ ! "$INPUT_DIR" = /* ]]; then
-    INPUT_DIR="$(cd "$(dirname "$0")/$INPUT_DIR" && pwd)"
+    INPUT_DIR="$(cd "$SCRIPT_DIR/$INPUT_DIR" && pwd)"
   fi
   if [[ ! -d "$INPUT_DIR" ]]; then
     error "Input directory does not exist: $INPUT_DIR"
@@ -268,129 +270,40 @@ detect_main_adoc() {
 ### --- Check fonts referenced in theme ---
 verify_fonts() {
   log "Verifying fonts..."
-  local script_dir="$(cd "$(dirname "$0")" && pwd)"
-  local theme_file="$script_dir/$THEME_FILE"
+  local theme_file="$THEME_FILE"
+  if [[ "$theme_file" != /* ]]; then
+    theme_file="$SCRIPT_DIR/$THEME_FILE"
+  fi
 
   if [ ! -f "$theme_file" ]; then
     warn "Theme file not found: $theme_file"
     return 1
   fi
 
-  # Get configured font family from theme
-  local font_family=$(grep -A 1 '^font:' "$theme_file" | grep 'family:' | awk '{print $2}' | tr -d "'\"")
-  [ -z "$font_family" ] && font_family="Inter"  # Default font
+  if [[ ! -d "$FONTS_DIR" ]]; then
+    warn "Bundled fonts directory not found: $FONTS_DIR"
+  else
+    log "Using bundled fonts from: $FONTS_DIR"
+    local missing_fonts=0
+    local required_fonts=(
+      "Inter-Regular.ttf"
+      "Inter-Bold.ttf"
+      "Inter-Italic.ttf"
+      "Inter-BoldItalic.ttf"
+    )
 
-  # Check if font is available in system
-  local font_available=false
-
-  # Check system fonts first
-  if command -v fc-list >/dev/null; then
-    if fc-list | grep -qi "^/.*$font_family" 2>/dev/null; then
-      log "Found system font: $font_family"
-      font_available=true
-    fi
-  fi
-
-  # If not found in system, check local fonts directory
-  if [ "$font_available" = false ] && [ -d "$FONTS_DIR" ]; then
-    if find "$FONTS_DIR" -type f \( -name "${font_family,,}*.ttf" -o -name "${font_family,,}*.otf" -o -name "${font_family}*.ttf" -o -name "${font_family}*.otf" \) | grep -q .; then
-      log "Found font in local directory: $font_family"
-      font_available=true
-    fi
-  fi
-
-  # If font not found anywhere, use Arial as fallback
-  if [ "$font_available" = false ]; then
-    warn "Font '$font_family' not found in system or local directory. Falling back to Arial."
-
-    # Update theme file to use Arial
-    if grep -q '^font:' "$theme_file"; then
-      sed -i '' -e "s/^  family:.*/  family: Arial/" "$theme_file"
-      sed -i '' -e "s/^    Inter:/    Arial:/" "$theme_file"
-      log "Updated theme to use Arial as fallback font"
-    fi
-
-    # Check if Arial is available
-    if ! fc-list | grep -qi arial 2>/dev/null; then
-      warn "Arial font not found. The PDF may have font rendering issues."
-    fi
-  fi
-
-  # Update font catalog in theme to use actual font files found in system
-  log "Updating theme font catalog with system font names..."
-  local theme_updated=false
-
-  # Update Inter fonts if available
-  if fc-list | grep -qi "Inter" 2>/dev/null; then
-    local inter_files=$(fc-list | grep -i "Inter" | head -1 | cut -d: -f1)
-    if [[ -n "$inter_files" ]]; then
-      log "Found Inter font: $inter_files"
-      # Update theme to use the actual Inter font file
-      if [[ "$inter_files" == *.ttc ]]; then
-        sed -i '' -e "s|normal: Inter[^.]*\.ttf|normal: $(basename "$inter_files")|g" "$theme_file"
-        sed -i '' -e "s|bold: Inter[^.]*\.ttf|bold: $(basename "$inter_files")|g" "$theme_file"
-        sed -i '' -e "s|italic: Inter[^.]*\.ttf|italic: $(basename "$inter_files")|g" "$theme_file"
-        sed -i '' -e "s|bold_italic: Inter[^.]*\.ttf|bold_italic: $(basename "$inter_files")|g" "$theme_file"
-        theme_updated=true
-      fi
-    fi
-  fi
-
-  # Update Arial fonts if available
-  if fc-list | grep -qi "Arial" 2>/dev/null; then
-    local arial_normal=$(fc-list | grep -i "Arial.*Regular" | head -1 | cut -d: -f1)
-    local arial_bold=$(fc-list | grep -i "Arial.*Bold" | head -1 | cut -d: -f1)
-    local arial_italic=$(fc-list | grep -i "Arial.*Italic" | head -1 | cut -d: -f1)
-    local arial_bold_italic=$(fc-list | grep -i "Arial.*Bold.*Italic" | head -1 | cut -d: -f1)
-
-    if [[ -n "$arial_normal" ]]; then
-      sed -i '' -e "s|normal: Arial[^.]*\.ttf|normal: $(basename "$arial_normal")|g" "$theme_file"
-      theme_updated=true
-    fi
-    if [[ -n "$arial_bold" ]]; then
-      sed -i '' -e "s|bold: Arial[^.]*\.ttf|bold: $(basename "$arial_bold")|g" "$theme_file"
-      theme_updated=true
-    fi
-    if [[ -n "$arial_italic" ]]; then
-      sed -i '' -e "s|italic: Arial[^.]*\.ttf|italic: $(basename "$arial_italic")|g" "$theme_file"
-      theme_updated=true
-    fi
-    if [[ -n "$arial_bold_italic" ]]; then
-      sed -i '' -e "s|bold_italic: Arial[^.]*\.ttf|bold_italic: $(basename "$arial_bold_italic")|g" "$theme_file"
-      theme_updated=true
-    fi
-  fi
-
-  if [ "$theme_updated" = true ]; then
-    log "Updated theme.yml with correct system font file names"
-  fi
-
-  # Verify that the fonts referenced in the theme actually exist in system
-  local font_issues=0
-  grep -A 10 "catalog:" "$theme_file" | grep -E "(normal|bold|italic|bold_italic):" | while read -r line; do
-    font_file=$(echo "$line" | awk '{print $2}' | tr -d '"')
-    if [[ -n "$font_file" && "$font_file" != *.ttc && "$font_file" != *.ttf ]]; then
-      continue
-    fi
-
-    # Check if font exists in system directories
-    font_found=false
-    for font_dir in "/System/Library/Fonts" "/System/Library/Fonts/Supplemental" "/Library/Fonts" "$HOME/Library/Fonts"; do
-      if [[ -f "$font_dir/$font_file" ]]; then
-        font_found=true
-        break
+    for font_file in "${required_fonts[@]}"; do
+      if [[ ! -f "$FONTS_DIR/$font_file" ]]; then
+        warn "Missing bundled font: $font_file"
+        ((missing_fonts++))
       fi
     done
 
-    if [ "$font_found" = false ]; then
-      warn "Font file not found in system: $font_file"
-      ((font_issues++))
+    if [[ $missing_fonts -eq 0 ]]; then
+      log "All bundled Inter font files are present."
+    else
+      warn "Found $missing_fonts missing bundled fonts. PDF output may fall back to system fonts."
     fi
-  done
-
-  if [ "$font_issues" -gt 0 ]; then
-    warn "Theme references $font_issues font files that are not available in the system."
-    warn "PDF generation may fail. Consider updating the theme.yml with available fonts."
   fi
 }
 ### --- Render embedded diagrams ---
@@ -442,6 +355,34 @@ generate_output() {
   local base="$(basename "$MAIN" .adoc)"
   # Output to current working directory (where script was called from)
   local out="${OUTPUT_FILE:-$base.$FORMAT}"
+  local theme_path="$THEME_FILE"
+  if [[ "$theme_path" != /* ]]; then
+    theme_path="$SCRIPT_DIR/$THEME_FILE"
+  fi
+
+  local theme_args=()
+  if [[ -f "$theme_path" ]]; then
+    local theme_dir="$(dirname "$theme_path")"
+    local theme_file_name="$(basename "$theme_path")"
+    local theme_base="${theme_file_name%.*}"
+    local theme_name="$theme_base"
+    if [[ "$theme_base" == *"-theme" ]]; then
+      theme_name="${theme_base%-theme}"
+    fi
+    theme_args=(-a "pdf-themesdir=$theme_dir" -a "pdf-theme=$theme_name")
+  else
+    warn "Theme file not found when generating output: $theme_path"
+  fi
+
+  local fonts_dirs=""
+  if [[ -d "$FONTS_DIR" ]]; then
+    fonts_dirs="$FONTS_DIR"
+  fi
+
+  local fonts_args=()
+  if [[ -n "$fonts_dirs" ]]; then
+    fonts_args=(-a "pdf-fontsdir=$fonts_dirs")
+  fi
 
   if [[ "$FORMAT" == "pdf" ]]; then
     log "Generating PDF ..."
@@ -449,6 +390,8 @@ generate_output() {
     # Change to input directory and generate PDF
     # The output will be in the current working directory
     if (cd "$(dirname "$MAIN")" && asciidoctor-pdf -r asciidoctor-diagram \
+      "${theme_args[@]}" \
+      "${fonts_args[@]}" \
       -o "../doc-renderer/$out" \
       "$(basename "$MAIN")") 2>/dev/null; then
 
@@ -457,15 +400,25 @@ generate_output() {
       warn "PDF generation failed. Trying with system fonts..."
 
       # Try with system font directories
-      local system_font_dirs=""
+      local fallback_font_dirs="$fonts_dirs"
       for font_dir in "/System/Library/Fonts" "/System/Library/Fonts/Supplemental" "/Library/Fonts" "$HOME/Library/Fonts"; do
         if [[ -d "$font_dir" ]]; then
-          system_font_dirs="$system_font_dirs -a pdf-fontsdir=\"$font_dir\""
+          if [[ -n "$fallback_font_dirs" ]]; then
+            fallback_font_dirs="$fallback_font_dirs:$font_dir"
+          else
+            fallback_font_dirs="$font_dir"
+          fi
         fi
       done
 
+      local fallback_fonts_args=()
+      if [[ -n "$fallback_font_dirs" ]]; then
+        fallback_fonts_args=(-a "pdf-fontsdir=$fallback_font_dirs")
+      fi
+
       if (cd "$(dirname "$MAIN")" && asciidoctor-pdf -r asciidoctor-diagram \
-        $system_font_dirs \
+        "${theme_args[@]}" \
+        "${fallback_fonts_args[@]}" \
         -o "../doc-renderer/$out" \
         "$(basename "$MAIN")") 2>/dev/null; then
 
