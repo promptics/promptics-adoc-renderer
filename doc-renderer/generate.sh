@@ -13,21 +13,14 @@ DEBUG=false
 
 # Derived paths
 FONTS_DIR="$SCRIPT_DIR/fonts"
-FONT_RELEASE_URL="https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip"
-FONT_ARCHIVE_NAME="Inter-4.1.zip"
-FONT_ARCHIVE_PATH="$SCRIPT_DIR/$FONT_ARCHIVE_NAME"
-REQUIRED_FONTS=(
-  "Inter-Regular.ttf"
-  "Inter-Bold.ttf"
-  "Inter-Italic.ttf"
-  "Inter-BoldItalic.ttf"
-)
-FONT_ARCHIVE_ENTRIES=(
-  "extras/ttf/Inter-Regular.ttf"
-  "extras/ttf/Inter-Bold.ttf"
-  "extras/ttf/Inter-Italic.ttf"
-  "extras/ttf/Inter-BoldItalic.ttf"
-)
+FONT_RELEASE_URL=""
+FONT_ARCHIVE_NAME=""
+FONT_ARCHIVE_PATH=""
+DEFAULT_REQUIRED_FONTS=()
+declare -a REQUIRED_FONTS=("${DEFAULT_REQUIRED_FONTS[@]}")
+declare -a FONT_ARCHIVE_ENTRIES=()
+declare -a FONT_DIRECT_URLS=()
+declare -a FONT_DIRECT_URL_MAP=()
 MISSING_TOOLS=()
 INSTALLABLE_TOOLS=()
 PACKAGE_MANAGER=""
@@ -261,6 +254,98 @@ download_plantuml() {
   fi
 }
 
+map_font_to_archive_entry() {
+  local font_file="$1"
+  case "$font_file" in
+    InterVariable.ttf|InterVariable-Italic.ttf)
+      echo "$font_file"
+      ;;
+    Inter-*.ttf|InterDisplay-*.ttf)
+      echo "extras/ttf/$font_file"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+map_font_to_direct_url() {
+  local font_file="$1"
+  case "$font_file" in
+    RedHatDisplay-*.ttf)
+      echo "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/master/fonts/Proportional/RedHatDisplay/ttf/$font_file"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+load_theme_fonts() {
+  local theme_file="$1"
+  local fonts_output=""
+
+  if command -v ruby > /dev/null; then
+    fonts_output=$(ruby -ryaml - "$theme_file" <<'RUBY' 2>/dev/null | tr -d '\r'
+require 'yaml'
+theme = YAML.load_file(ARGV.shift) rescue nil
+fonts = []
+if theme && theme['font']
+  catalog = theme['font']['catalog'] || {}
+  catalog.each_value do |faces|
+    next unless faces.is_a?(Hash)
+    faces.each_value do |path|
+      fonts << path if path.is_a?(String)
+    end
+  end
+end
+fonts.uniq.each { |f| puts f }
+RUBY
+)
+  fi
+
+  if [[ -n "$fonts_output" ]]; then
+    REQUIRED_FONTS=()
+    while IFS= read -r font; do
+      [[ -z "$font" ]] && continue
+      REQUIRED_FONTS+=("$font")
+    done <<< "$fonts_output"
+  else
+    REQUIRED_FONTS=("${DEFAULT_REQUIRED_FONTS[@]}")
+  fi
+
+  FONT_ARCHIVE_ENTRIES=()
+  FONT_DIRECT_URLS=()
+  FONT_DIRECT_URL_MAP=()
+  local archive_required=false
+  local direct_urls=()
+  local direct_url_map=()
+
+  for font_file in "${REQUIRED_FONTS[@]}"; do
+    local archive_entry="$(map_font_to_archive_entry "$font_file")"
+    local direct_url="$(map_font_to_direct_url "$font_file")"
+    FONT_ARCHIVE_ENTRIES+=("$archive_entry")
+    direct_urls+=("$direct_url")
+    direct_url_map+=("$font_file:$direct_url")
+    if [[ -n "$archive_entry" ]]; then
+      archive_required=true
+    fi
+  done
+
+  if [[ "$archive_required" == true ]]; then
+    FONT_RELEASE_URL="https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip"
+    FONT_ARCHIVE_NAME="Inter-4.1.zip"
+    FONT_ARCHIVE_PATH="$SCRIPT_DIR/$FONT_ARCHIVE_NAME"
+  else
+    FONT_RELEASE_URL=""
+    FONT_ARCHIVE_NAME=""
+    FONT_ARCHIVE_PATH=""
+  fi
+
+  FONT_DIRECT_URLS=("${direct_urls[@]}")
+  FONT_DIRECT_URL_MAP=("${direct_url_map[@]}")
+}
+
 ### --- Ensure bundled fonts are available ---
 ensure_bundled_fonts() {
   mkdir -p "$FONTS_DIR"
@@ -278,18 +363,25 @@ ensure_bundled_fonts() {
   fi
 
   local need_archive=false
-  for font_file in "${missing_fonts[@]}"; do
-    need_archive=true
-    break
+  for i in "${!missing_fonts[@]}"; do
+    local entry="${FONT_ARCHIVE_ENTRIES[$i]}"
+    if [[ -n "$entry" ]]; then
+      need_archive=true
+      break
+    fi
   done
 
-  if [[ "$need_archive" == true ]]; then
-    log "Downloading bundled Inter fonts..."
+  if [[ "$need_archive" == true && -n "$FONT_RELEASE_URL" ]]; then
+    log "Downloading bundled fonts archive..."
     if curl -fsSL "$FONT_RELEASE_URL" -o "$FONT_ARCHIVE_PATH"; then
       $DEBUG && log "Downloaded font archive to $FONT_ARCHIVE_PATH"
       for i in "${!missing_fonts[@]}"; do
         local font_file="${missing_fonts[$i]}"
         local entry="${FONT_ARCHIVE_ENTRIES[$i]}"
+        if [[ -z "$entry" ]]; then
+          warn "No bundled source known for $font_file. Please provide it manually."
+          continue
+        fi
         if unzip -j -o "$FONT_ARCHIVE_PATH" "$entry" -d "$FONTS_DIR" >/dev/null 2>&1; then
           mv "$FONTS_DIR/$(basename "$entry")" "$FONTS_DIR/$font_file" 2>/dev/null || true
           $DEBUG && log "Extracted $font_file"
@@ -299,9 +391,33 @@ ensure_bundled_fonts() {
       done
       rm -f "$FONT_ARCHIVE_PATH"
     else
-      warn "Failed to download Inter fonts archive from $FONT_RELEASE_URL"
+      warn "Failed to download fonts archive from $FONT_RELEASE_URL"
     fi
   fi
+
+  # Download fonts via direct URLs if still missing
+  for font_file in "${missing_fonts[@]}"; do
+    if [[ -f "$FONTS_DIR/$font_file" ]]; then
+      continue
+    fi
+    local direct_url=""
+    for mapping in "${FONT_DIRECT_URL_MAP[@]}"; do
+      local name="${mapping%%:*}"
+      local url="${mapping#*:}"
+      if [[ "$name" == "$font_file" ]]; then
+        direct_url="$url"
+        break
+      fi
+    done
+    if [[ -n "$direct_url" ]]; then
+      log "Downloading $font_file from upstream repository..."
+      if curl -fsSL "$direct_url" -o "$FONTS_DIR/$font_file"; then
+        $DEBUG && log "Downloaded $font_file"
+      else
+        warn "Failed to download $font_file from $direct_url"
+      fi
+    fi
+  done
 }
 
 ### --- Determine main .adoc file ---
@@ -338,6 +454,7 @@ verify_fonts() {
     return 1
   fi
 
+  load_theme_fonts "$theme_file"
   ensure_bundled_fonts
 
   if [[ ! -d "$FONTS_DIR" ]]; then
@@ -354,7 +471,7 @@ verify_fonts() {
     done
 
     if [[ $missing_fonts -eq 0 ]]; then
-      log "All bundled Inter font files are present."
+      log "All bundled theme fonts are present."
     else
       warn "Found $missing_fonts missing bundled fonts. PDF output may fall back to system fonts."
     fi
